@@ -13,7 +13,7 @@ import numpy as np
 import openai
 import tiktoken
 import tqdm
-from openai import OpenAI
+from openai import AzureOpenAI, OpenAI
 
 from .. import constants, utils
 
@@ -331,6 +331,28 @@ def _get_price_per_token(model, price_per_token=None):
         return np.nan
 
 
+# def _get_backwards_compatible_configs(
+#     openai_api_keys=[], openai_organization_ids=[None], openai_api_base=None
+# ) -> list[dict[str, Any]]:
+#     if isinstance(openai_api_keys, str) or openai_api_keys is None:
+#         openai_api_keys = [openai_api_keys]
+#     if isinstance(openai_organization_ids, str) or openai_organization_ids is None:
+#         openai_organization_ids = [openai_organization_ids]
+
+#     client_configs = []
+#     for api_key in openai_api_keys:
+#         for org in openai_organization_ids:
+#             client_kwargs = dict(api_key=api_key)
+
+#             if org is not None:
+#                 client_kwargs["organization"] = org
+
+#             if openai_api_base is not None:
+#                 client_kwargs["base_url"] = openai_api_base
+
+#             client_configs.append(client_kwargs)
+
+#     return client_configs
 def _get_backwards_compatible_configs(
     openai_api_keys=[], openai_organization_ids=[None], openai_api_base=None
 ) -> list[dict[str, Any]]:
@@ -339,17 +361,47 @@ def _get_backwards_compatible_configs(
     if isinstance(openai_organization_ids, str) or openai_organization_ids is None:
         openai_organization_ids = [openai_organization_ids]
 
+    # Check if Azure OpenAI is being used
+    is_azure = (
+        os.getenv("OPENAI_API_TYPE") == "azure"
+        or os.getenv("AZURE_OPENAI_ENDPOINT") is not None
+        or os.getenv("AZURE_OPENAI_API_KEY") is not None
+    )
+
     client_configs = []
-    for api_key in openai_api_keys:
-        for org in openai_organization_ids:
-            client_kwargs = dict(api_key=api_key)
-
-            if org is not None:
-                client_kwargs["organization"] = org
-
-            if openai_api_base is not None:
-                client_kwargs["base_url"] = openai_api_base
-
+    
+    if is_azure:
+        # Azure OpenAI configuration
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        api_version = os.getenv("OPENAI_API_VERSION", "2024-02-15-preview")
+        azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        
+        # Use AZURE_OPENAI_API_KEY if available, otherwise fall back to the provided keys
+        if azure_api_key:
+            keys_to_use = [azure_api_key]
+        else:
+            keys_to_use = openai_api_keys
+        
+        for api_key in keys_to_use:
+            client_kwargs = dict(
+                client_class="openai.AzureOpenAI",
+                api_key=api_key,
+                api_version=api_version,
+                azure_endpoint=azure_endpoint,
+            )
             client_configs.append(client_kwargs)
+    else:
+        # Standard OpenAI configuration
+        for api_key in openai_api_keys:
+            for org in openai_organization_ids:
+                client_kwargs = dict(api_key=api_key)
+
+                if org is not None:
+                    client_kwargs["organization"] = org
+
+                if openai_api_base is not None:
+                    client_kwargs["base_url"] = openai_api_base
+
+                client_configs.append(client_kwargs)
 
     return client_configs
